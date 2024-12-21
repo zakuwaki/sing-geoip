@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -68,10 +70,10 @@ func get(downloadURL *string) ([]byte, error) {
 
 func download(release *github.RepositoryRelease) ([]byte, error) {
 	geoipAsset := common.Find(release.Assets, func(it *github.ReleaseAsset) bool {
-		return *it.Name == "Country.mmdb"
+		return *it.Name == "GeoLite2-Country.mmdb"
 	})
 	if geoipAsset == nil {
-		return nil, E.New("Country.mmdb not found in upstream release ", release.Name)
+		return nil, E.New("GeoLite2-Country.mmdb not found in upstream release ", release.Name)
 	}
 	return get(geoipAsset.BrowserDownloadURL)
 }
@@ -161,6 +163,25 @@ func write(writer *mmdbwriter.Tree, dataMap map[string][]*net.IPNet, output stri
 	return err
 }
 
+func writeTxt(dataMap map[string][]*net.IPNet, output string, code string) (err error) {
+	outputFile, err := os.Create(output)
+	if err != nil {
+		return
+	}
+	defer outputFile.Close()
+
+	if data, ok := dataMap[code]; ok {
+		w := bufio.NewWriter(outputFile)
+		for _, v := range data {
+			if len(v.IP) == net.IPv4len {
+				fmt.Fprintln(w, v.String())
+			}
+		}
+		return w.Flush()
+	}
+	return
+}
+
 func release(source string, destination string, output string, ruleSetOutput string) error {
 	sourceRelease, err := fetch(source)
 	if err != nil {
@@ -193,7 +214,19 @@ func release(source string, destination string, output string, ruleSetOutput str
 	if err != nil {
 		return err
 	}
-	err = write(writer, countryMap, output, nil)
+	err = write(writer, countryMap, output+".db", nil)
+	if err != nil {
+		return err
+	}
+	writer, err = newWriter(metadata, []string{"cn"})
+	if err != nil {
+		return err
+	}
+	err = write(writer, countryMap, output+"-cn.db", []string{"cn"})
+	if err != nil {
+		return err
+	}
+	err = writeTxt(countryMap, "geoip-cn.txt", "cn")
 	if err != nil {
 		return err
 	}
@@ -248,7 +281,7 @@ func setActionOutput(name string, content string) {
 }
 
 func main() {
-	err := release("Dreamacro/maxmind-geoip", "sagernet/sing-geoip", "geoip.db", "rule-set")
+	err := release("P3TERX/GeoLite.mmdb", "zakuwaki/sing-geoip", "geoip", "rule-set")
 	if err != nil {
 		log.Fatal(err)
 	}
